@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BL Navigation 1.0</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+        }
+        #map {
+            height: 100vh;
+            width: 100vw;
+        }
+        .floating-input {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            width: calc(100% - 20px);
+            max-width: 400px;
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .floating-input input {
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 16px;
+            outline: none;
+        }
+        .floating-input button {
+            padding: 10px;
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        #customer-info {
+            position: fixed;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            width: calc(100% - 20px);
+            max-width: 400px;
+            display: none;
+            z-index: 1000;
+        }
+        #customer-info h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+        #customer-info p {
+            margin: 5px 0 0;
+            font-size: 14px;
+            color: #555;
+        }
+
+        .floating-buttons-container {
+            position: fixed;
+            left: 20px;
+            bottom: 80px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .floating-button, #navigate, #recenter {
+            background-color: white;
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            transition: transform 0.3s ease-in-out;
+        }
+        .floating-button:hover, #navigate:hover, #recenter:hover {
+            transform: scale(1.1);
+        }
+        #recenter img, #navigate img, .floating-button img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        #navigate {
+            background-color: #34A853;
+        }       
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="floating-input">
+        <input type="text" id="customer-ids" placeholder="Enter customer IDs (e.g., 1,2,3)" />
+        <button id="set-route">Set Route</button>
+    </div>
+    <div id="customer-info">
+        <h3 id="customer-name"></h3>
+        <p id="customer-Contact"></p>
+        <p id="customer-coordinates"></p>
+    </div>
+
+    <div class="floating-buttons-container">
+        <button class="floating-button" id="zoom-in">
+            <img src="https://cdn-icons-png.flaticon.com/512/992/992651.png" alt="Zoom In">
+        </button>
+        <button class="floating-button" id="zoom-out">
+            <img src="https://cdn-icons-png.flaticon.com/512/992/992683.png" alt="Zoom Out">
+        </button>
+        <button class="floating-button" id="recenter">
+            <img src="https://cdn-icons-png.flaticon.com/512/929/929430.png" alt="Recenter">
+        </button>
+        <button class="floating-button" id="start-navigation" disabled>
+            <img src="https://cdn-icons-png.flaticon.com/512/684/684908.png" alt="Navigate">
+        </button>
+    </div>
+
+    <script>
+        const map = L.map('map', { zoomControl: false }).setView([6.1677, 80.1864], 10);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        let customers = [];
+        let displayedMarkers = [];
+        let routingControl = null;
+        let userLocation = null;
+
+        // Voice guidance using SpeechSynthesis API
+        function voiceGuidance(text) {
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.lang = 'en-US';
+            window.speechSynthesis.speak(msg);
+        }
+
+        // Fetch customer data from API
+        async function fetchCustomers() {
+            try {
+                const response = await fetch('/api/customers');
+                customers = await response.json();
+            } catch (error) {
+                console.error('Error fetching customer data:', error);
+            }
+        }
+
+        // Clear existing markers
+        function clearMarkers() {
+            displayedMarkers.forEach(marker => map.removeLayer(marker));
+            displayedMarkers = [];
+        }
+
+        // Show markers for selected customer IDs
+        function showMarkersForIDs(ids) {
+            clearMarkers();
+            const selectedCustomers = ids.map(id => customers.find(c => c.id === id)).filter(Boolean);
+
+            selectedCustomers.forEach(customer => {
+                const marker = L.marker([customer.latitude, customer.longitude], {
+                    icon: L.icon({
+                        iconUrl: 'https://cdn-icons-png.flaticon.com/512/252/252025.png',
+                        iconSize: [32, 32],
+                    }),
+                })
+                    .addTo(map)
+                    .on('click', () => showCustomerInfo(customer));
+
+                displayedMarkers.push(marker);
+            });
+        }
+
+        // Display customer information in the popup
+        function showCustomerInfo(customer) {
+            const infoBox = document.getElementById('customer-info');
+            infoBox.style.display = 'block';
+            document.getElementById('customer-name').innerText = `Name: ${customer.name}`;
+            document.getElementById('customer-Contact').innerText = `Contact: ${customer.contact}`;
+            document.getElementById('customer-coordinates').innerText = `Coordinates: ${customer.latitude}, ${customer.longitude}`;
+        }
+
+        // Set route for selected customer IDs
+        function setRouteForIDs(ids) {
+            const selectedCustomers = ids.map(id => customers.find(c => c.id === id)).filter(Boolean);
+
+            if (!userLocation) {
+                alert('User location is not available.');
+                return;
+            }
+
+            if (selectedCustomers.length !== ids.length) {
+                alert('Some customer IDs are invalid. Please check and try again.');
+                return;
+            }
+
+            if (routingControl) {
+                map.removeControl(routingControl);
+            }
+
+            const waypoints = [L.latLng(userLocation)];
+            selectedCustomers.forEach(customer => waypoints.push(L.latLng(customer.latitude, customer.longitude)));
+
+            routingControl = L.Routing.control({
+                waypoints: waypoints,
+                routeWhileDragging: true,
+                createMarker: () => null,
+                language: 'en',
+            }).addTo(map);
+
+            map.flyTo(waypoints[0], 14);
+            document.getElementById('start-navigation').disabled = false; // Enable navigation button
+
+            // Listen for route instructions and waypoint passed
+            routingControl.on('routesfound', (event) => {
+                const route = event.routes[0];
+                const instructions = route.instructions;
+                voiceGuidance(`Starting navigation to the first waypoint.`);
+
+                routingControl.on('waypointpassed', (e) => {
+                    const nextIndex = e.waypointIndex + 1;
+                    if (nextIndex < instructions.length) {
+                        const nextInstruction = instructions[nextIndex];
+                        voiceGuidance(nextInstruction.text);
+                    } else {
+                        voiceGuidance(`You have reached your destination.`);
+                    }
+                });
+            });
+        }
+
+        // Update user's current location
+        async function updateCurrentLocation() {
+            if (!navigator.geolocation) {
+                alert('Geolocation is not supported by your browser');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                position => {
+                    userLocation = [position.coords.latitude, position.coords.longitude];
+                    L.marker(userLocation, {
+                        icon: L.icon({
+                            iconUrl: 'https://cdn-icons-png.flaticon.com/512/483/483361.png',
+                            iconSize: [32, 32],
+                        }),
+                    }).addTo(map).bindPopup('Your Location').openPopup();
+                },
+                error => {
+                    console.error('Error retrieving location:', error);
+                    alert('Unable to retrieve location. Please enable location services.');
+                },
+                { enableHighAccuracy: true }
+            );
+        }
+
+        // Button event listeners
+        document.getElementById('set-route').addEventListener('click', () => {
+            const input = document.getElementById('customer-ids').value.trim();
+            const ids = input.split(',').map(id => parseInt(id.trim(), 10));
+
+            if (!ids.length) {
+                alert('Please enter valid customer IDs.');
+                return;
+            }
+
+            showMarkersForIDs(ids);
+            setRouteForIDs(ids);
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            map.zoomIn();
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            map.zoomOut();
+        });
+
+        document.getElementById('recenter').addEventListener('click', () => {
+            if (userLocation) {
+                map.flyTo(userLocation, 14);
+            } else {
+                alert('User location not available.');
+            }
+        });
+
+        document.getElementById('start-navigation').addEventListener('click', () => {
+            if (routingControl) {
+                routingControl.setRouteIndex(0); // Start navigation from the first waypoint
+                alert('Navigation started.');
+            } else {
+                alert('Please set the route first.');
+            }
+        });
+
+        // Initialize map with customer data and current location
+        async function initializeMap() {
+            await fetchCustomers();
+            updateCurrentLocation();
+        }
+
+        initializeMap();
+
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+    </script>
+</body>
+</html>
