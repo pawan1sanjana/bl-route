@@ -74,7 +74,6 @@
             font-size: 14px;
             color: #555;
         }
-
         .floating-buttons-container {
             position: fixed;
             left: 20px;
@@ -84,7 +83,7 @@
             flex-direction: column;
             gap: 15px;
         }
-        .floating-button, #navigate, #recenter {
+        .floating-button {
             background-color: white;
             border: none;
             border-radius: 50%;
@@ -94,17 +93,14 @@
             cursor: pointer;
             transition: transform 0.3s ease-in-out;
         }
-        .floating-button:hover, #navigate:hover, #recenter:hover {
+        .floating-button:hover {
             transform: scale(1.1);
         }
-        #recenter img, #navigate img, .floating-button img {
+        .floating-button img {
             width: 100%;
             height: 100%;
             object-fit: contain;
         }
-        #navigate {
-            background-color: #34A853;
-        }       
     </style>
 </head>
 <body>
@@ -115,10 +111,9 @@
     </div>
     <div id="customer-info">
         <h3 id="customer-name"></h3>
-        <p id="customer-Contact"></p>
+        <p id="customer-contact"></p>
         <p id="customer-coordinates"></p>
     </div>
-
     <div class="floating-buttons-container">
         <button class="floating-button" id="zoom-in">
             <img src="https://cdn-icons-png.flaticon.com/512/992/992651.png" alt="Zoom In">
@@ -129,11 +124,7 @@
         <button class="floating-button" id="recenter">
             <img src="https://cdn-icons-png.flaticon.com/512/929/929430.png" alt="Recenter">
         </button>
-        <button class="floating-button" id="start-navigation" disabled>
-            <img src="https://cdn-icons-png.flaticon.com/512/684/684908.png" alt="Navigate">
-        </button>
     </div>
-
     <script>
         const map = L.map('map', { zoomControl: false }).setView([6.1677, 80.1864], 10);
 
@@ -143,6 +134,7 @@
         let displayedMarkers = [];
         let routingControl = null;
         let userLocation = null;
+        let userMarker = null;
 
         // Voice guidance using SpeechSynthesis API
         function voiceGuidance(text) {
@@ -191,7 +183,7 @@
             const infoBox = document.getElementById('customer-info');
             infoBox.style.display = 'block';
             document.getElementById('customer-name').innerText = `Name: ${customer.name}`;
-            document.getElementById('customer-Contact').innerText = `Contact: ${customer.contact}`;
+            document.getElementById('customer-contact').innerText = `Contact: ${customer.contact}`;
             document.getElementById('customer-coordinates').innerText = `Coordinates: ${customer.latitude}, ${customer.longitude}`;
         }
 
@@ -224,44 +216,52 @@
             }).addTo(map);
 
             map.flyTo(waypoints[0], 14);
-            document.getElementById('start-navigation').disabled = false; // Enable navigation button
 
-            // Listen for route instructions and waypoint passed
             routingControl.on('routesfound', (event) => {
                 const route = event.routes[0];
-                const instructions = route.instructions;
-                voiceGuidance(`Starting navigation to the first waypoint.`);
+                voiceGuidance('Starting navigation.');
 
                 routingControl.on('waypointpassed', (e) => {
-                    const nextIndex = e.waypointIndex + 1;
-                    if (nextIndex < instructions.length) {
-                        const nextInstruction = instructions[nextIndex];
-                        voiceGuidance(nextInstruction.text);
+                    const nextWaypoint = e.waypointIndex + 1;
+                    if (nextWaypoint < route.waypoints.length) {
+                        const nextInstruction = route.instructions[nextWaypoint].text;
+                        voiceGuidance(nextInstruction);
                     } else {
-                        voiceGuidance(`You have reached your destination.`);
+                        voiceGuidance('You have reached your destination.');
                     }
                 });
             });
         }
 
-        // Update user's current location
-        async function updateCurrentLocation() {
+        // Track user location dynamically
+        function trackUserLocation() {
             if (!navigator.geolocation) {
                 alert('Geolocation is not supported by your browser');
                 return;
             }
 
-            navigator.geolocation.getCurrentPosition(
-                position => {
-                    userLocation = [position.coords.latitude, position.coords.longitude];
-                    L.marker(userLocation, {
-                        icon: L.icon({
-                            iconUrl: 'https://cdn-icons-png.flaticon.com/512/483/483361.png',
-                            iconSize: [32, 32],
-                        }),
-                    }).addTo(map).bindPopup('Your Location').openPopup();
+            navigator.geolocation.watchPosition(
+                (position) => {
+                    const newLocation = [position.coords.latitude, position.coords.longitude];
+                    userLocation = newLocation;
+
+                    if (!userMarker) {
+                        userMarker = L.marker(userLocation, {
+                            icon: L.icon({
+                                iconUrl: 'https://cdn-icons-png.flaticon.com/512/483/483361.png',
+                                iconSize: [32, 32],
+                            }),
+                        }).addTo(map).bindPopup('Your Location');
+                    } else {
+                        userMarker.setLatLng(userLocation);
+                    }
+
+                    map.setView(userLocation, 14);
+                    if (routingControl) {
+                        routingControl.spliceWaypoints(0, 1, L.latLng(userLocation));
+                    }
                 },
-                error => {
+                (error) => {
                     console.error('Error retrieving location:', error);
                     alert('Unable to retrieve location. Please enable location services.');
                 },
@@ -299,24 +299,13 @@
             }
         });
 
-        document.getElementById('start-navigation').addEventListener('click', () => {
-            if (routingControl) {
-                routingControl.setRouteIndex(0); // Start navigation from the first waypoint
-                alert('Navigation started.');
-            } else {
-                alert('Please set the route first.');
-            }
-        });
-
-        // Initialize map with customer data and current location
+        // Initialize map with customer data and dynamic location tracking
         async function initializeMap() {
             await fetchCustomers();
-            updateCurrentLocation();
+            trackUserLocation();
         }
 
         initializeMap();
-
-        document.getElementById('current-year').textContent = new Date().getFullYear();
     </script>
 </body>
 </html>
