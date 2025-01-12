@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Customer Navigation Map with Voice Guidance</title>
+    <title>Customer Navigation Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -51,28 +51,25 @@
             cursor: pointer;
             font-size: 16px;
         }
-        #customer-info {
+        #directions-box {
             position: fixed;
-            bottom: 10px;
+            bottom: 50px;
             left: 50%;
             transform: translateX(-50%);
             background-color: white;
             padding: 15px;
             border-radius: 10px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-            width: calc(100% - 20px);
-            max-width: 400px;
             display: none;
             z-index: 1000;
         }
-        #customer-info h3 {
-            margin: 0;
+        #directions-box h3 {
+            margin: 0 0 5px;
             font-size: 18px;
         }
-        #customer-info p {
-            margin: 5px 0 0;
-            font-size: 14px;
-            color: #555;
+        #directions-box p {
+            margin: 0;
+            font-size: 16px;
         }
         .floating-buttons-container {
             position: fixed;
@@ -83,7 +80,7 @@
             flex-direction: column;
             gap: 15px;
         }
-        .floating-button, #navigate, #recenter {
+        .floating-button, #recenter {
             background-color: white;
             border: none;
             border-radius: 50%;
@@ -93,26 +90,22 @@
             cursor: pointer;
             transition: transform 0.3s ease-in-out;
         }
-        .floating-button:hover, #navigate:hover, #recenter:hover {
+        .floating-button:hover, #recenter:hover {
             transform: scale(1.1);
         }
-        #recenter img, #navigate img, .floating-button img {
+        .floating-button img, #recenter img {
             width: 100%;
             height: 100%;
             object-fit: contain;
         }
-        #navigate {
-            background-color: #34A853;
-        }
         footer {
             position: fixed;
-            bottom: 0;
-            width: 100%;
-            background-color: #f1f1f1;
-            text-align: center;
-            padding: 10px;
-            box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
             font-size: 14px;
+            color: #777;
+            z-index: 1000;
         }
     </style>
 </head>
@@ -122,10 +115,9 @@
         <input type="text" id="customer-ids" placeholder="Enter customer IDs (e.g., 1,2,3)" />
         <button id="set-route">Set Route</button>
     </div>
-    <div id="customer-info">
-        <h3 id="customer-name"></h3>
-        <p id="customer-Contact"></p>
-        <p id="customer-coordinates"></p>
+    <div id="directions-box">
+        <h3>Next Turn</h3>
+        <p id="current-direction">No directions available.</p>
     </div>
     <div class="floating-buttons-container">
         <button class="floating-button" id="zoom-in">
@@ -137,32 +129,24 @@
         <button class="floating-button" id="recenter">
             <img src="https://cdn-icons-png.flaticon.com/512/929/929430.png" alt="Recenter">
         </button>
-        <button class="floating-button" id="start-navigation" disabled>
-            <img src="https://cdn-icons-png.flaticon.com/512/684/684908.png" alt="Navigate">
-        </button>
     </div>
-
     <footer>
-        &copy; <span id="current-year"></span> PawanSamaraweeraTM. All rights reserved.
+        &copy; 2024 Your Company Name. All rights reserved.
     </footer>
 
     <script>
         const map = L.map('map', { zoomControl: false }).setView([6.1677, 80.1864], 10);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+        }).addTo(map);
 
         let customers = [];
-        let displayedMarkers = [];
         let routingControl = null;
         let userLocation = null;
+        let turnDirections = [];
+        let currentDirectionIndex = 0;
 
-        // Voice guidance
-        function voiceGuidance(text) {
-            const msg = new SpeechSynthesisUtterance(text);
-            msg.lang = 'en-US';
-            window.speechSynthesis.speak(msg);
-        }
-
-        // Fetch customer data
         async function fetchCustomers() {
             try {
                 const response = await fetch('/api/customers');
@@ -172,40 +156,17 @@
             }
         }
 
-        // Clear existing markers
-        function clearMarkers() {
-            displayedMarkers.forEach(marker => map.removeLayer(marker));
-            displayedMarkers = [];
-        }
+        async function updateCurrentLocation() {
+            if (!navigator.geolocation) {
+                alert('Geolocation is not supported by your browser.');
+                return;
+            }
 
-        // Show markers for selected customer IDs
-        function showMarkersForIDs(ids) {
-            clearMarkers();
-            const selectedCustomers = ids.map(id => customers.find(c => c.id === id)).filter(Boolean);
-
-            selectedCustomers.forEach(customer => {
-                const marker = L.marker([customer.latitude, customer.longitude], {
-                    icon: L.icon({
-                        iconUrl: 'https://cdn-icons-png.flaticon.com/512/252/252025.png',
-                        iconSize: [32, 32],
-                    })
-                })
-                    .addTo(map)
-                    .on('click', () => showCustomerInfo(customer));
-
-                displayedMarkers.push(marker);
+            navigator.geolocation.watchPosition(position => {
+                userLocation = [position.coords.latitude, position.coords.longitude];
             });
         }
 
-        // Display customer information in the popup
-        function showCustomerInfo(customer) {
-            const infoBox = document.getElementById('customer-info');
-            infoBox.style.display = 'block';
-            document.getElementById('customer-name').innerText = `Name: ${customer.name}`;
-            document.getElementById('customer-Contact').innerText = `Contact: ${customer.contact}`;
-        }
-
-        // Set route for selected customer IDs
         function setRouteForIDs(ids) {
             const selectedCustomers = ids.map(id => customers.find(c => c.id === id)).filter(Boolean);
 
@@ -230,58 +191,50 @@
                 waypoints: waypoints,
                 routeWhileDragging: true,
                 createMarker: () => null,
-                language: 'en',  // Ensure voice is in English
             }).addTo(map);
 
-            map.flyTo(waypoints[0], 14);
-            document.getElementById('start-navigation').disabled = false; // Enable navigation button
+            setupTurnByTurnNavigation();
+        }
 
-            // Listen for route instructions
-            routingControl.on('routesfound', (event) => {
-                const route = event.routes[0];
+        function setupTurnByTurnNavigation() {
+            routingControl.on('routesfound', function (e) {
+                const route = e.routes[0];
                 const instructions = route.instructions;
-                voiceGuidance(instructions, 0);
+
+                // Filter for meaningful turn instructions
+                turnDirections = instructions.filter(instr => instr.type !== 'Straight');
+                currentDirectionIndex = 0;
+
+                if (turnDirections.length > 0) {
+                    displayNextTurn();
+                } else {
+                    document.getElementById('directions-box').style.display = 'none';
+                }
+            });
+
+            map.on('locationfound', function (e) {
+                if (currentDirectionIndex < turnDirections.length) {
+                    const currentTurn = turnDirections[currentDirectionIndex];
+                    const distanceToTurn = map.distance(e.latlng, currentTurn.latLng);
+
+                    if (distanceToTurn < 50) {
+                        currentDirectionIndex++;
+                        displayNextTurn();
+                    }
+                }
             });
         }
 
-        // Voice guidance using SpeechSynthesis API
-        function voiceGuidance(instructions, index) {
-            if (index >= instructions.length) return;
-
-            const instruction = instructions[index];
-            const text = instruction.text;
-            const msg = new SpeechSynthesisUtterance(text);
-            msg.lang = 'en-US';
-            window.speechSynthesis.speak(msg);
-
-        }
-
-        // Update user's current location
-        async function updateCurrentLocation() {
-            if (!navigator.geolocation) {
-                alert('Geolocation is not supported by your browser');
-                return;
+        function displayNextTurn() {
+            if (currentDirectionIndex < turnDirections.length) {
+                const nextTurn = turnDirections[currentDirectionIndex];
+                document.getElementById('current-direction').textContent = nextTurn.text;
+                document.getElementById('directions-box').style.display = 'block';
+            } else {
+                document.getElementById('directions-box').style.display = 'none';
             }
-
-            navigator.geolocation.getCurrentPosition(
-                position => {
-                    userLocation = [position.coords.latitude, position.coords.longitude];
-                    L.marker(userLocation, {
-                        icon: L.icon({
-                            iconUrl: 'https://cdn-icons-png.flaticon.com/512/483/483361.png',
-                            iconSize: [32, 32],
-                        }),
-                    }).addTo(map).bindPopup('Your Location').openPopup();
-                },
-                error => {
-                    console.error('Error retrieving location:', error);
-                    alert('Unable to retrieve location. Please enable location services.');
-                },
-                { enableHighAccuracy: true }
-            );
         }
 
-        // Button event listeners
         document.getElementById('set-route').addEventListener('click', () => {
             const input = document.getElementById('customer-ids').value.trim();
             const ids = input.split(',').map(id => parseInt(id.trim(), 10));
@@ -291,7 +244,6 @@
                 return;
             }
 
-            showMarkersForIDs(ids);
             setRouteForIDs(ids);
         });
 
@@ -311,24 +263,12 @@
             }
         });
 
-        document.getElementById('start-navigation').addEventListener('click', () => {
-            if (routingControl) {
-                routingControl.setRouteIndex(0); // Start navigation from the first waypoint
-                alert('Navigation started.');
-            } else {
-                alert('Please set the route first.');
-            }
-        });
-
-        // Initialize map with customer data and current location
         async function initializeMap() {
             await fetchCustomers();
             updateCurrentLocation();
         }
 
         initializeMap();
-
-        document.getElementById('current-year').textContent = new Date().getFullYear();
     </script>
 </body>
-</html>
+</html> improve the code by adding icons for locations and add an arrow for navigation just like google maps
