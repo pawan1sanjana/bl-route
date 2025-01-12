@@ -80,7 +80,7 @@
             flex-direction: column;
             gap: 15px;
         }
-        .floating-button, #recenter {
+        .floating-button {
             background-color: white;
             border: none;
             border-radius: 50%;
@@ -90,10 +90,10 @@
             cursor: pointer;
             transition: transform 0.3s ease-in-out;
         }
-        .floating-button:hover, #recenter:hover {
+        .floating-button:hover {
             transform: scale(1.1);
         }
-        .floating-button img, #recenter img {
+        .floating-button img {
             width: 100%;
             height: 100%;
             object-fit: contain;
@@ -142,7 +142,7 @@
         }).addTo(map);
 
         let customers = [];
-        let routingControl = null;
+        let userMarker = null;
         let userLocation = null;
         let turnDirections = [];
         let currentDirectionIndex = 0;
@@ -151,9 +151,30 @@
             try {
                 const response = await fetch('/api/customers');
                 customers = await response.json();
+
+                customers.forEach(customer => {
+                    L.marker([customer.latitude, customer.longitude])
+                        .addTo(map)
+                        .bindPopup(`Customer ID: ${customer.id}`);
+                });
             } catch (error) {
                 console.error('Error fetching customer data:', error);
             }
+        }
+
+        function updateUserLocation(lat, lng) {
+            userLocation = [lat, lng];
+            if (userMarker) {
+                userMarker.setLatLng(userLocation);
+            } else {
+                userMarker = L.marker(userLocation, {
+                    icon: L.icon({
+                        iconUrl: 'https://cdn-icons-png.flaticon.com/512/1946/1946488.png',
+                        iconSize: [30, 30],
+                    }),
+                }).addTo(map);
+            }
+            map.setView(userLocation, 14);
         }
 
         async function updateCurrentLocation() {
@@ -162,9 +183,24 @@
                 return;
             }
 
-            navigator.geolocation.watchPosition(position => {
-                userLocation = [position.coords.latitude, position.coords.longitude];
-            });
+            navigator.geolocation.watchPosition(
+                position => {
+                    const { latitude, longitude } = position.coords;
+                    updateUserLocation(latitude, longitude);
+
+                    if (turnDirections.length > 0 && currentDirectionIndex < turnDirections.length) {
+                        const currentTurn = turnDirections[currentDirectionIndex];
+                        const distanceToTurn = map.distance(userLocation, currentTurn.latLng);
+
+                        if (distanceToTurn < 50) {
+                            currentDirectionIndex++;
+                            displayNextTurn();
+                        }
+                    }
+                },
+                error => console.error('Error with geolocation:', error),
+                { enableHighAccuracy: true }
+            );
         }
 
         function setRouteForIDs(ids) {
@@ -180,47 +216,24 @@
                 return;
             }
 
-            if (routingControl) {
-                map.removeControl(routingControl);
-            }
-
             const waypoints = [L.latLng(userLocation)];
             selectedCustomers.forEach(customer => waypoints.push(L.latLng(customer.latitude, customer.longitude)));
 
-            routingControl = L.Routing.control({
-                waypoints: waypoints,
-                routeWhileDragging: true,
-                createMarker: () => null,
-            }).addTo(map);
+            const router = L.Routing.osrmv1();
+            router.route(waypoints, (err, routes) => {
+                if (err) {
+                    console.error('Routing error:', err);
+                    return;
+                }
 
-            setupTurnByTurnNavigation();
-        }
-
-        function setupTurnByTurnNavigation() {
-            routingControl.on('routesfound', function (e) {
-                const route = e.routes[0];
-                const instructions = route.instructions;
-
-                // Filter for meaningful turn instructions
-                turnDirections = instructions.filter(instr => instr.type !== 'Straight');
+                const route = routes[0];
+                turnDirections = route.instructions.filter(instr => instr.type !== 'Straight');
                 currentDirectionIndex = 0;
 
                 if (turnDirections.length > 0) {
                     displayNextTurn();
                 } else {
                     document.getElementById('directions-box').style.display = 'none';
-                }
-            });
-
-            map.on('locationfound', function (e) {
-                if (currentDirectionIndex < turnDirections.length) {
-                    const currentTurn = turnDirections[currentDirectionIndex];
-                    const distanceToTurn = map.distance(e.latlng, currentTurn.latLng);
-
-                    if (distanceToTurn < 50) {
-                        currentDirectionIndex++;
-                        displayNextTurn();
-                    }
                 }
             });
         }
