@@ -3,7 +3,7 @@ self.addEventListener('install', (event) => {
         caches.open('tea-nav-cache').then((cache) => {
             return cache.addAll([
                 '/',
-                '/index.html',
+                '/success.html',
                 '/img/favicon.ico',
                 '/css/styles.css',
                 '/js/app.js'

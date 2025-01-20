@@ -2,7 +2,7 @@
     "name": "Customer Navigation",
     "short_name": "TeaNav",
     "description": "Enhanced Customer Navigation Map for tea factory customers",
-    "start_url": "/index.html",
+    "start_url": "/success.html",
     "display": "standalone",
     "background_color": "#ffffff",
     "theme_color": "#4285F4",
